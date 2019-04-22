@@ -1,0 +1,18 @@
+/var/pg_base/pg_utils/logs/pg_backup.log {
+    rotate 5
+    missingok
+    notifempty
+    compress
+    size 5M
+    daily
+    copytruncate
+}
+/var/pg_base/pg_utils/logs/pg_xlog_backup.log {
+    rotate 5
+    missingok
+    notifempty
+    compress
+    size 5M
+    daily
+    copytruncate
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Application": { "value": "Argus-Redhat" },
+    "DevOpsStorageAccountAccessKey": { "value": "Runtime" },
+    "DevOpsStorageAccountName": { "value": "Runtime" },
+    "Domain": { "value": "Runtime" },
+    "EnvironmentId": { "value": "Runtime" },
+    "customScriptStorageAccountName": { "value": "ameargusrpmrepo" },
+    "customScriptStorageAccountKey": { "value": "#{customScriptStorageAccountKey}#" },
+    "fileUris": {
+      "value": "https://ameargusrpmrepo.blob.core.windows.net/rpms/setup.sh"
+    },
+    "commandToExecute": {
+      "value": "bash ./setup.sh"
+    },
+    "Offer": { "value": "RHEL" },
+    "OMSResourceGroup": { "value": "audit_prod_rg_aaps_sec_oms" },
+    "OMSSubscriptionID": { "value": "8c71ef53-4473-4862-af36-bae6e40451b2" },
+    "OMSWorkspaceName": { "value": "aaps-sec-oms" },
+    "OrganizationalUnit": { "value": "Audit" },
+    "Publisher": { "value": "RedHat" },
+    "ServerCount": { "value": 0 },
+    "ServerNames": { "value": [ "" ] },
+    "Sku": { "value": "7.2" },
+    "Version": { "value": "latest" },
+    "VirtualMachineSize": { "value": "Standard_A4_v2" },
+    "VmAdminPassword": { "value": "Runtime" },
+    "VmAdminUsername": { "value": "VMAdmin" },
+    "TagBillingCode": { "value": "A" },
+    "TagContactsBO": { "value": "B" },
+    "TagContactsGroup": { "value": "C" },
+    "TagContactsPC": { "value": "D" },
+    "TagContactsSC": { "value": "E" },
+    "TagCountry": { "value": "F" },
+    "TagCsClassification": { "value": "G" },
+    "TagCsQualifier": { "value": "H" },
+    "TagCsType": { "value": "I" },
+    "TagsAppID": { "value": "CI3595938" },
+    "TagFunction": { "value": "{\"Function\":\"AUD\",\"Geo\":\"$(GEO)\"}" },
+    "TagMemberFirm": { "value": "K" }
+  }
+}

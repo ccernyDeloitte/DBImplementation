@@ -1,0 +1,17 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Location": { "value": "East Us" },
+    "Geo": { "value": "AME" },
+    "Environment": { "value": "PROD" },
+    "StorageSkuName": { "value": "Standard_LRS" },
+    "StorageSkuTier": { "value": "Standard" },
+    "TagsMemberFirm": { "value": "US" },
+    "TagsCountry": { "value": "US" },
+    "TagsContacts": { "value": "{\"Group\":\"usauditdevopsame@deloitte.com\",\"PrimaryContact\":\"mstrolle@deloitte.com;lalsworthelvey@deloitte.com\",\"SecondaryContact\":\"pbibireddy@deloitte.com\",\"BusinessOwneer\":\"jnaumann@deloitte.com;jhino@deloitte.com\"}" },
+    "TagsBillingCode": { "value": "FPX15805-RN-01-AZ-6629" },
+    "TagsCS": { "value": "{\"Classification\":\"HRC\",\"Type\":\"Both\",\"Qualifier\":\"High Risk Confidential\"}" },
+    "TagsAppID": { "value": "Argus" }
+  }
+}

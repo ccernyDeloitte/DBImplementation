@@ -1,0 +1,258 @@
+﻿{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Application": {
+      "type": "string",
+      "metadata": {
+        "description": "Description of what application this VM is used for.  The tag 'Application' will be set to this value"
+      }
+    },
+    "DevOpsStorageAccountAccessKey": {
+      "type": "securestring"
+    },
+    "DevOpsStorageAccountName": {
+      "type": "string"
+    },
+    "DiskSizeGB": {
+      "type": "int",
+      "defaultValue": 128
+    },
+    "Domain": {
+      "type": "string"
+    },
+    "EnvironmentId": {
+      "type": "string"
+    },
+    "Location": {
+      "type": "string"
+    },
+    "ManagedDiskAccountType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS"
+    },
+    "Offer": {
+      "type": "string",
+      "defaultValue": "RHEL"
+    },
+    "OMSResourceGroup": {
+      "type": "string"
+    },
+    "OMSSubscriptionID": {
+      "type": "string"
+    },
+    "OMSWorkspaceName": {
+      "type": "string"
+    },
+    "OrganizationalUnit": {
+      "type": "string"
+    },
+    "PlatformFaultDomainCount": {
+      "type": "int",
+      "defaultValue": 3
+    },
+    "PodDomainServicePassword": {
+      "type": "securestring"
+    },
+    "PodDomainServiceUser": {
+      "type": "string"
+    },
+    "Publisher": {
+      "type": "string",
+      "defaultValue": "RedHat"
+    },
+    "ServerCount": {
+      "type": "int"
+    },
+    "ServerNames": {
+      "type": "array"
+    },
+    "Sku": {
+      "type": "string",
+      "defaultValue": "7.2"
+    },
+    "StarsLifeCycle": {
+      "type": "string"
+    },
+    "StarsPOD": {
+      "type": "string"
+    },
+    "SubnetRef": {
+      "type": "string"
+    },
+    "TimeZone": {
+      "type": "string"
+    },
+    "Version": {
+      "type": "string"
+    },
+    "VirtualMachineSize": {
+      "type": "string",
+      "defaultValue": "Standard_DS5_v2"
+    },
+    "VmAdminPassword": {
+      "type": "securestring"
+    },
+    "VmAdminUsername": {
+      "type": "string",
+      "defaultValue": "VmAdmin"
+    },
+    "TagBillingCode": {
+      "type": "string"
+    },
+    "TagContactsBO": {
+      "type": "string"
+    },
+    "TagContactsGroup": {
+      "type": "string"
+    },
+    "TagContactsPC": {
+      "type": "string"
+    },
+    "TagContactsSC": {
+      "type": "string"
+    },
+    "TagCountry": {
+      "type": "string"
+    },
+    "TagCsClassification": {
+      "type": "string"
+    },
+    "TagCsQualifier": {
+      "type": "string"
+    },
+    "TagCsType": {
+      "type": "string"
+    },
+    "TagFunction": {
+      "type": "string"
+    },
+    "TagMemberFirm": {
+      "type": "string"
+    }
+  },
+  "variables": {
+    "Description": "[concat(parameters('EnvironmentId'),' App Server')]",
+    "OMSResourceID": "[resourceId(parameters('OMSSubscriptionId'), parameters('OMSResourceGroup'), 'Microsoft.OperationalInsights/workspaces/', parameters('OMSWorkspaceName'))]"
+  },
+  "resources": [
+    {
+      "name": "[parameters('ServerNames')[copyIndex()]]",
+      "tags": {
+        "VmType": "app",
+        "Group": "US AUDIT",
+        "Application": "[parameters('Application')]",
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+        "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+        "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+        "FUNCTION": "[parameters('TagFunction')]",
+        "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },
+      "copy": {
+        "name": "AppServerCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2016-04-30-preview",
+      "location": "[parameters('Location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkInterfaces/',concat(parameters('ServerNames')[copyIndex()],'-nic'))]",
+        "[concat('Microsoft.Compute/disks/',concat(parameters('ServerNames')[copyIndex()],'-datadisk1'))]"
+      ],
+      "properties": {
+        "osProfile": {
+          "computerName": "[parameters('ServerNames')[copyIndex()]]",
+          "adminUsername": "[parameters('VmAdminUsername')]",
+          "adminPassword": "[parameters('VmAdminPassword')]"
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('VirtualMachineSize')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[parameters('Publisher')]",
+            "offer": "[parameters('Offer')]",
+            "sku": "[parameters('Sku')]",
+            "version": "[parameters('Version')]"
+          },
+          "osDisk": {
+            "name": "[concat(parameters('ServerNames')[copyIndex()],'-osdisk')]",
+            "createOption": "fromImage",
+            "caching": "ReadWrite"
+          },
+          "dataDisks": [
+            {
+              "name": "[concat(parameters('ServerNames')[copyIndex()],'-datadisk1')]",
+              "lun": 0,
+              "managedDisk": {
+                "id": "[resourceId('Microsoft.Compute/disks', concat(parameters('ServerNames')[copyIndex()],'-datadisk1'))]"
+              },
+              "createOption": "Attach"
+            }
+          ]
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('ServerNames')[copyIndex()],'-nic'))]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-datadisk1')]",
+      "copy": {
+        "name": "DiskCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Compute/disks",
+      "apiVersion": "2016-04-30-preview",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+        "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+        "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+        "FUNCTION": "[parameters('TagFunction')]",
+        "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },
+      "properties": {
+        "creationData": {
+          "createOption": "Empty"
+        },
+        "accountType": "[parameters('ManagedDiskAccountType')]",
+        "diskSizeGB": "[parameters('DiskSizeGB')]"
+      }
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-nic')]",
+      "copy": {
+        "name": "NicCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2016-09-01",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+        "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+        "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+        "FUNCTION": "[parameters('TagFunction')]",
+        "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[parameters('SubnetRef')]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

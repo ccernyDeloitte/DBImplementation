@@ -1,0 +1,125 @@
+﻿{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "AppName": {
+            "metadata": {
+                "description": "The name of the Application. This drives the naming of the resources"
+            },
+            "type": "string"
+        },
+        "Geo": {
+            "allowedValues": [
+                "AME",
+                "EMA",
+                "APA"
+            ],
+            "type": "string",
+            "metadata": {
+                "description": "The geo this infrastructure will be created in. Drives the naming of resources"
+            }
+        },
+        "Environment": {
+            "allowedValues": [
+                "UAT",
+                "TEST",
+                "SYS",
+                "SBX",
+                "NPD",
+                "PRD",
+                "DEV",
+                "STAGE",
+                "LOAD",
+                "QA",
+                "BCP",
+                "NLOCAL"
+            ],
+            "type": "string",
+            "metadata": {
+                "description": "The geo this infrastructure will be created in. Drives the naming of resources"
+            }
+        },
+        "Location": {
+            "type": "string",
+            "defaultValue": "East US",
+            "metadata": {
+                "description": "Location for all resources."
+            }
+        },
+        "TAGSADDENDUM": {
+            "type": "string"
+        },
+        "TAGSAPPID": {
+            "type": "string"
+        },
+        "TAGSBILLINGCODE": {
+            "type": "string"
+        },
+        "TAGSCONTACTS": {
+            "type": "string"
+        },
+        "TAGSCS": {
+            "type": "string"
+        },
+        "TAGSFUNCTION": {
+            "type": "string"
+        },
+        "TAGSMEMBERFIRM": {
+            "type": "string"
+        },
+        "TAGSREQUESTID": {
+            "type": "string"
+        },
+        "TAGSENVIRONMENT": {
+            "type": "string"
+        },
+        "StorageAccountSKU": {
+            "defaultValue": "Standard_LRS",
+            "type": "string",
+            "metadata": {
+                "description": "Storage Account sku"
+            }
+        },
+        "StorageAccountAccessTier": {
+            "defaultValue": "Cool",
+            "type": "string",
+            "metadata": {
+                "description": "Storage Account Access Tier"
+            }
+        }
+    },
+    "variables": {
+        "StorageAccountName": "[toLower(concat(first(parameters('Environment')),parameters('AppName'),parameters('Geo'), 'storage'))]"
+    },
+    "resources": [
+        {
+            "name": "[variables('StorageAccountName')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "sku": {
+                "name": "[parameters('StorageAccountSKU')]"
+            },
+            "kind": "StorageV2",
+            "apiVersion": "2018-02-01",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "tags": {
+                "APPID": "[parameters('TAGSAPPID')]",
+                "BILLINGCODE": "[parameters('TAGSBILLINGCODE')]",
+                "CONTACTS": "[parameters('TAGSCONTACTS')]",
+                "ENVIRONMENT": "[parameters('TAGSENVIRONMENT')]",
+                "CS": "[parameters('TAGSCS')]",
+                "FUNCTION": "[parameters('TAGSFUNCTION')]",
+                "MEMBERFIRM": "[parameters('TAGSMEMBERFIRM')]",
+                "ADDENDUM": "[parameters('TAGSADDENDUM')]",
+                "REQUESTID": "[parameters('TAGSREQUESTID')]"
+            },
+            "properties": {
+                "defaultAction": "string",
+                "accessTier": "[parameters('StorageAccountAccessTier')]",
+                "supportsHttpsTrafficOnly": true
+            }
+        }
+    ]
+}

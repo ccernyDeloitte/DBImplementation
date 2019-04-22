@@ -1,0 +1,1621 @@
+#!/bin/env python
+# Copyright 2015 Kira Inc.
+
+version='2.3.1-sdk'
+# compat requires docker-py 0.7.0, but please use newer
+# next version will require docker-py 1.5.0
+
+import argparse
+import ConfigParser
+import string
+import re
+import time
+import shutil
+import docker
+import os
+import random
+
+restart_policy = {"MaximumRetryCount":0, "Name": "always"}
+
+# set a base_path
+base_path = '/opt/kira'
+if os.path.isdir('/opt/diligenceengine') and not os.path.isdir(base_path):
+   base_path = '/opt/diligenceengine'
+
+# Read configuration file
+config = ConfigParser.SafeConfigParser()
+config.optionxform = str
+
+config.add_section('postgresql')
+config.set('postgresql', 'enabled', 'false')
+config.set('postgresql', 'uri', '//db:9999')
+config.set('postgresql', 'password', 'de_password')
+config.set('postgresql', 'admin_password', 'de_firmadm_password')
+
+config.add_section('rabbitmq')
+config.set('rabbitmq', 'enabled', 'false')
+config.set('rabbitmq', 'password', 'deqm_password')
+config.set('rabbitmq', 'custom_config', 'false')
+config.set('rabbitmq', 'heartbeat', '600')
+config.set('rabbitmq', 'expose_management', 'false')
+
+config.add_section('web')
+config.set('web', 'enabled', 'false')
+config.set('web', 'max_heap', '4g')
+config.set('web', 'jars_path', base_path + '/jars')
+config.set('web', 'port', '443')
+
+config.add_section('scheduler')
+config.set('scheduler', 'enabled', 'false')
+config.set('scheduler', 'max_heap', '1g')
+config.set('scheduler', 'jars_path', base_path + '/jars')
+
+config.add_section('doc-converter')
+config.set('doc-converter', 'enabled', 'false')
+config.set('doc-converter', 'threads', '2')
+config.set('doc-converter', 'max_heap', '4g')
+config.set('doc-converter', 'jars_path', base_path + '/jars')
+config.set('doc-converter', 'omnipage_path', base_path + '/omnipage')
+
+config.add_section('jamie')
+config.set('jamie', 'enabled', 'false')
+config.set('jamie', 'threads', '2')
+config.set('jamie', 'max_heap', '4g')
+config.set('jamie', 'jars_path', base_path + '/jars')
+
+config.add_section('jamie-learn')
+config.set('jamie-learn', 'enabled', 'false')
+config.set('jamie-learn', 'threads', '2')
+config.set('jamie-learn', 'max_heap', '4g')
+config.set('jamie-learn', 'jars_path', base_path + '/jars')
+
+config.add_section('jamie-export')
+config.set('jamie-export', 'enabled', 'false')
+config.set('jamie-export', 'threads', '2')
+config.set('jamie-export', 'max_heap', '4g')
+config.set('jamie-export', 'jars_path', base_path + '/jars')
+
+config.add_section('preconvert')
+config.set('preconvert', 'enabled', 'false')
+config.set('preconvert', 'max_heap', '4g')
+config.set('preconvert', 'jars_path', base_path + '/jars')
+config.set('preconvert', 'image', 'localhost:5000/kira/jamie:2016-07-11')
+
+config.add_section('cluster')
+config.set('cluster', 'enabled', 'false')
+config.set('cluster', 'max_heap', '2g')
+config.set('cluster', 'jars_path', base_path + '/jars')
+
+config.add_section('admin')
+config.set('admin', 'enabled', 'false')
+config.set('admin', 'port', '9090')
+config.set('admin', 'max_heap', '2g')
+config.set('admin', 'jars_path', base_path + '/jars')
+
+config.add_section('reporting')
+config.set('reporting', 'enabled', 'false')
+config.set('reporting', 'max_heap', '1g')
+config.set('reporting', 'jars_path', base_path + '/jars')
+
+config.add_section('analytics')
+config.set('analytics', 'enabled', 'false')
+config.set('analytics', 'max_heap', '2g')
+config.set('analytics', 'jars_path', base_path + '/jars')
+
+config.add_section('general')
+config.set('general', 'base_path', base_path)
+
+config.add_section('extra_hosts')
+
+config.read(os.path.join(os.path.abspath(os.path.dirname(__file__)),
+            'common.conf'))
+config.read(os.path.join(os.path.abspath(os.path.dirname(__file__)),
+            'node.conf'))
+
+base_path = config.get('general','base_path')
+
+# Config helpers
+def has_option(section,name):
+    for pair in config.items(section):
+        if pair[0] == name:
+            return True
+    return False
+
+def get_opt(section,name,default=''):
+    if config.has_option(section, name):
+        return config.get(section,name)
+    return default
+
+# Connect to docker
+#d = docker.Client(base_url='unix://var/run/docker.sock', timeout=60, version='auto') # if client, server versions different
+d = docker.Client(base_url='unix://var/run/docker.sock', timeout=60)
+
+def find_container(name):
+    n = '/' + name
+    for c in d.containers(all=True):
+        if c['Names'] and n in c['Names']:
+            return c
+
+def is_running(name):
+    try:
+        container = d.inspect_container(name)
+        return container['State']['Running']
+    except docker.errors.APIError:
+        pass
+    return False
+
+#
+def exec_hack(container, command):
+    if not docker.version == '0.7.0':
+        # sane version
+        return d.exec_start(d.exec_create(container=container, cmd=command))
+
+    else:
+        # compat version
+        return d.execute(container, command)
+
+# Environment builders
+def postgresql_env(env={}):
+    uri = config.get('postgresql','uri' )
+
+    # override connection location if local.
+    if config.getboolean('postgresql', 'local'):
+        uri = '//postgresql'
+
+    env['DB_SERVER'] = uri
+    env['DE_WEB_TEMPLATE'] = uri + '/de_web_template'
+
+    if has_option('postgresql','password_enc'):
+        env['DB_PWD_ENC'] = config.get('postgresql', 'password_enc')
+    else:
+        env['DB_PWD'] = config.get('postgresql', 'password')
+
+    if has_option('postgresql','admin_password_enc'):
+        env['DE_WEB_TEMPLATE_PASSWORD_ENC'] = config.get('postgresql', 'admin_password_enc')
+    else:
+        env['DE_WEB_TEMPLATE_PASSWORD'] = config.get('postgresql', 'admin_password')
+
+    return env
+
+def elastic_env(env={}):
+    env['ES_HOST']         = config.get('elasticsearch', 'host')
+    env['ES_CLUSTER_NAME'] = config.get('elasticsearch', 'cluster_name')
+    env['ES_CLIENT_PORT']  = get_opt('elasticsearch', 'client_port', '9300')
+    env['ES_HTTP_PORT']    = get_opt('elasticsearch', 'http_port',   '9200')
+    return env
+
+def rabbitmq_env(env={}):
+    nodes = config.get('rabbitmq', 'nodes')
+    if config.getboolean('rabbitmq', 'local'):
+        nodes = 'rabbitmq'
+
+    env['MQ_SERVER'] = nodes
+    env['RMQ_SERVER'] = nodes
+    env['RMQ_HEARTBEAT'] = config.get('rabbitmq', 'heartbeat')
+
+    if has_option('rabbitmq','password_enc'):
+        env['MQ_PWD_ENC'] = config.get('rabbitmq', 'password_enc')
+        env['RMQ_PWD_ENC'] = config.get('rabbitmq', 'password_enc')
+    else:
+        env['MQ_PWD'] = config.get('rabbitmq', 'password')
+        env['RMQ_PWD'] = config.get('rabbitmq', 'password')
+
+    return env
+
+def zookeeper_env(env={}):
+    nodes = config.get('zookeeper', 'nodes')
+    if config.getboolean('zookeeper', 'local'):
+        nodes = 'zookeeper'
+
+    env['ZOOKEEPER'] = nodes
+
+    return env
+
+def common_conf_env(module, env={}):
+    try:
+        for pair in config.items(module + ':env'):
+            env[pair[0]] = pair[1]
+    except ConfigParser.NoSectionError:
+        pass
+    return env
+
+def add_tmp_bind(d):
+    d[base_path+'/tmp'] = { 'bind': '/tmp', 'ro':False }
+
+# Link builders
+
+def add_postgresql_link(links):
+    if config.getboolean('postgresql', 'local'):
+        links['postgresql'] = 'postgresql'
+
+def add_rabbitmq_link(links):
+    if config.getboolean('rabbitmq', 'local'):
+        links['rabbitmq'] = 'rabbitmq'
+
+def add_zookeeper_link(links):
+    if config.getboolean('zookeeper', 'local'):
+        links['zookeeper'] = 'zookeeper'
+
+# Process extra hostnames for container /etc/hosts
+
+def add_extra_hosts(extra_hosts):
+    for host,ip in config.items('extra_hosts'):
+        extra_hosts[host]=ip
+
+# RabbitMQ config
+
+rabbitmq_config = """
+[
+  {rabbit, [
+          {cluster_nodes, {[%(nodes)s], disc}},
+            {default_user, <<"deqm">>},
+            {default_pass, <<"deqm_password">>}
+  ]}
+].
+"""
+
+def rabbitmq_hostname():
+    hostname = config.get('general','hostname')
+    if config.getboolean('rabbitmq', 'local'):
+        hostname = 'rabbitmq'
+    return hostname
+
+def rabbitmq_server_env():
+    hostname = rabbitmq_hostname()
+    return {'HOSTNAME': hostname, 'RABBITMQ_NODENAME': 'rabbit@'+hostname}
+
+def rabbitmq_binds():
+    return {
+        base_path + '/rabbitmq': { 'bind': '/var/lib/rabbitmq', 'ro':False },
+        base_path + '/rabbitmq/etc': { 'bind': '/etc/rabbitmq', 'ro':True },
+        base_path + '/rabbitmq/log': { 'bind': '/var/log/rabbitmq', 'ro':False}}
+
+
+# run a rabbitmqctl command against the current node
+def rabbitmqctl(cmd, output=False):
+    entrypoint = ['/usr/sbin/rabbitmqctl'] + cmd
+
+    out = exec_hack('rabbitmq', entrypoint)
+
+    if output:
+        print out
+
+def init_rabbitmq():
+    print "Initializing rabbitmq"
+    nodes = re.split(',\s*', config.get('rabbitmq','nodes'))
+    if config.getboolean('rabbitmq', 'local'):
+        nodes = ['rabbitmq']
+
+    if find_container('rabbitmq'):
+        print 'Skipping: rabbitmq is already initialized.'
+        return
+
+    # write configuration file if not set to use a custom config
+    if not config.getboolean('rabbitmq','custom_config'):
+        cluster_nodes = [ "'rabbit@" + x + "'" for x in nodes ]
+        nodes_str = string.join( cluster_nodes, ',')
+        with open(base_path + '/rabbitmq/etc/rabbitmq.config','w') as f:
+            print >>f, rabbitmq_config % {'nodes': nodes_str}
+        with open(base_path + '/rabbitmq/etc/enabled_plugins','w') as f:
+            print >>f, "[rabbitmq_management]."
+
+    # default local config: nothing exposed
+    port_binds={}
+    if not config.getboolean('rabbitmq', 'local'):
+        # otherwise expose them
+        # first the necessary rabbit binds
+        port_binds.update({ 5672:5672,   # AQMP+SSL
+                            25672:25672, # Erlang distribution (RMQ clustering)
+                            4369:4369 }) # epmd (RMQ clustering)
+
+    # then the management port if the option is on
+    if config.getboolean('rabbitmq', 'expose_management'):
+        port_binds.update({15672:15672})  # management port
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=rabbitmq_binds(),
+        port_bindings=port_binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    # create container
+    hostname = rabbitmq_hostname()
+
+    env = rabbitmq_server_env()
+    env = common_conf_env('rabbitmq', env)
+
+    d.create_container('rabbitmq',
+                       name='rabbitmq',
+                       hostname=hostname,
+                       host_config=host_config,
+                       environment=env,
+                       #networking_config=networking_config,
+                       ports=[4369,5672,15672,25672],
+                       detach=True)
+
+    d.start('rabbitmq')
+
+    # wait for rabbitmq to actually start
+    time.sleep(5)
+
+    # setup ha policy
+    rabbitmqctl(['set_policy', 'ha', '', '{"ha-mode":"all", "ha-sync-mode":"automatic"}'])
+
+    # grab the rabbitmqadmin command
+    exec_hack('rabbitmq', ['curl', '-o', '/usr/sbin/rabbitmqadmin', 'http://localhost:15672/cli/rabbitmqadmin'])
+    exec_hack('rabbitmq', ['chmod', '+x', '/usr/sbin/rabbitmqadmin'])
+
+# Zookeeper config
+def init_zookeeper():
+    print "Initializing zookeeper"
+    nodes = re.split(',\s*', config.get('zookeeper','nodes'))
+
+    if find_container('zookeeper'):
+        print 'Skipping: zookeeper is already initialized.'
+        return
+
+    # write configuration file
+    cfg_file = base_path + '/zookeeper/conf/zoo.cfg'
+    shutil.copyfile(base_path + '/zookeeper/conf/zoo.cfg.template',cfg_file)
+
+    if not config.getboolean('zookeeper', 'local'):
+        with open(cfg_file,'a') as f:
+            i = 1
+            for n in nodes:
+                print >>f, "server.%(num)d=%(host)s:2888:3888" % {'host':n, 'num':i}
+                i = i + 1
+
+        # write myid file
+        hostname = config.get('general','hostname')
+        try:
+            myid = nodes.index(hostname) + 1
+        except ValueError:
+            print hostname + " is not in the list of zookeeper nodes: " + config.get('zookeeper','nodes')
+            exit(1)
+
+        with open(base_path + '/zookeeper/data/myid', 'w') as f:
+            print >>f, myid
+    else:
+        hostname='zookeeper'
+
+    # create container
+    # zookeeper uses its own hostname to determine who it is, so we need to set the hostname to
+    # match the external hostname
+
+
+    binds={
+      base_path + '/zookeeper/conf': { 'bind': '/home/de/zookeeper/conf', 'ro':True },
+      base_path + '/zookeeper/log': { 'bind': '/home/de/log', 'ro':False },
+      base_path + '/zookeeper/data': { 'bind': '/home/de/data', 'ro':False }
+    }
+
+    port_binds={2181:2181, 2888:2888, 3888:3888}
+    if config.getboolean('zookeeper', 'local'):
+        port_binds={}
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    entrypoint=['/home/de/zookeeper/bin/zkServer.sh', 'start-foreground']
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        port_bindings=port_binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+
+    d.create_container('zookeeper', #entrypoint=['/bin/yes'],
+                       entrypoint=entrypoint,
+                       hostname=hostname,
+                       host_config=host_config,
+                       #networking_config=networking_config,
+                       name='zookeeper',
+                       ports=[2181,2888,3888],
+                       detach=True)
+    
+    d.start('zookeeper')
+
+# scheduler config
+def init_scheduler():
+    print "Initializing scheduler"
+    # need zookeeper nodes and databse uri for config
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = zookeeper_env(env)
+    env = postgresql_env(env)
+
+    if has_option('scheduler','max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('scheduler', 'max_pool_size')
+
+    env = common_conf_env('scheduler', env)
+
+    if find_container('scheduler'):
+        print 'Skipping: scheduler is already initialized.'
+        return
+
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('scheduler', 'max_heap')),
+          '-Xmx' + str(config.get('scheduler', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',     # restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/scheduler_oom_dump.hprof',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.scheduler.jar',
+          'de.scheduler.core']
+    
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        config.get('scheduler','jars_path'): {'bind': '/home/de/jars', 'ro':True}
+    }
+
+    if has_option('scheduler','mdr_path'):
+        binds[config.get('scheduler','mdr_path')]={'bind': '/mdr', 'ro':True}
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='scheduler'
+
+    # create container
+    d.create_container('scheduler',
+                       name='scheduler',
+                       hostname=hostname,
+                       host_config=host_config,
+                       #networking_config=networking_config,
+                       environment=env,
+                       entrypoint=entrypoint,
+                       detach=True)
+
+
+
+    d.start('scheduler')
+
+# doc-converter config
+def init_doc_converter():
+    print "Initializing doc-converter"
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = postgresql_env(env)
+
+    threads = config.get('doc-converter', 'threads')
+    env['THREADS'] = threads
+
+    if has_option('doc-converter', 'max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('doc-converter', 'max_pool_size')
+
+    env = common_conf_env('doc-converter', env)
+
+    if find_container('doc-converter'):
+        print 'Skipping: doc-converter is already initialized.'
+        return
+
+    # If local, add links
+    links = {}
+    add_postgresql_link(links)
+    add_rabbitmq_link(links)
+
+    # entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('doc-converter', 'max_heap')),
+          '-Xmx' + str(config.get('doc-converter', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/admin/log/doc_converter_oom_dump.hprof',
+          '-cp', '/home/admin/jars/kira.configuration.jar:/home/admin/jars/de.doc-converter.jar',
+          'de.doc_converter.core',
+          '--office-home', '/opt/libreoffice',
+          '--parsepdf-bin', '/home/admin/bin/omnipage']
+
+    # setup binds
+    binds={
+        base_path + '/log': { 'bind': '/home/admin/log', 'ro':False },
+        config.get('doc-converter','jars_path'): {'bind': '/home/admin/jars', 'ro':True}
+    }
+    add_tmp_bind(binds)
+
+    # optional license and binary binds
+    if has_option('doc-converter', 'omnipage_path'):
+        path = config.get('doc-converter', 'omnipage_path')
+        print 'doc-converter: using omnipage path ' + path
+        binds[path + '/bin'] = {'bind': '/home/admin/bin', 'ro':True}
+        binds[path + '/license'] = {'bind': '/home/admin/omnipage', 'ro':True}
+
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+ 
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='doc-converter'
+
+    # create container
+    d.create_container('doc-converter',
+                       name='doc-converter',
+                       hostname=hostname,
+                       entrypoint=entrypoint,
+                       host_config=host_config,
+                       #networking_config=networking_config,
+                       environment=env,
+                       detach=True)
+
+    d.start('doc-converter')
+
+
+# jamie config
+# This is a little more complicated since we currently need to start separate processes
+# if a node wants to handle more than one job at a time.
+
+def init_jamie():
+    cname = 'jamie'
+    print "Initializing " + cname
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = zookeeper_env(env)
+    env = postgresql_env(env)
+
+    env['LOG_FILE'] = '/home/de/log/' + cname + '.log'
+
+    if has_option('jamie', 'max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('jamie', 'max_pool_size')
+    env['CRON'] = 'true'
+
+    env = common_conf_env('jamie', env)
+
+    if find_container(cname):
+        print 'Skipping: ' + cname + ' is already initialized.'
+        return
+
+    # entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('jamie', 'max_heap')),
+          '-Xmx' + str(config.get('jamie', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',# restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/jamie_oom_dump.hprof',
+          '-Dfile.encoding=UTF-8',
+          '-Djava.library.path=/usr/local/lib/jni/',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.jamie.jar',
+          'de.jamie.core',
+          '--data', '/home/de/data',
+          '--threads', str(config.getint('jamie', 'threads'))]
+
+
+    # start container
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        base_path + '/model-cache': { 'bind': '/home/de/data/model-tmp', 'ro':False },
+        config.get('jamie','jars_path'): {'bind': '/home/de/jars', 'ro':True},
+        #config.get('jamie','ml_path') + '/bin': {'bind': '/usr/local/bin', 'ro':True},
+        #config.get('jamie','ml_path') + '/lib': {'bind': '/usr/local/lib', 'ro':True},
+    }
+    add_tmp_bind(binds)
+
+    links = {}
+    add_rabbitmq_link(links)
+    add_postgresql_link(links)
+    add_zookeeper_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='jamie'
+
+    # create container
+    d.create_container('kira-ml',
+                       name=cname,
+                       host_config=host_config,
+                       hostname=hostname,
+                       #networking_config=networking_config,
+                       environment=env,
+                       entrypoint=entrypoint,
+                       detach=True)
+
+    d.start(cname)
+
+# jamie-learn config
+# This is a little more complicated since we currently need to start separate processes
+# if a node wants to handle more than one job at a time.
+
+# FIXME-jwc harmonize with init_jamie
+def init_jamie_learn():
+    cname = 'jamie-learn'
+    print "Initializing " + cname
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = zookeeper_env(env)
+    env = postgresql_env(env)
+    env['LOG_FILE'] = '/home/de/log/' + cname + '.log'
+
+    if has_option('jamie-learn', 'max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('jamie-learn', 'max_pool_size')
+
+    env = common_conf_env('jamie-learn', env)
+
+    if find_container(cname):
+        print 'Skipping: ' + cname + ' is already initialized.'
+        return
+
+    # entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('jamie-learn', 'max_heap')),
+          '-Xmx' + str(config.get('jamie-learn', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',# restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/jamie_learn_oom_dump.hprof',
+          '-Dfile.encoding=UTF-8',
+          '-Djava.library.path=/usr/local/lib/jni/',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.jamie.jar',
+          'de.jamie.core',
+          '--data', '/home/de/data',
+          '--threads', str(config.getint('jamie-learn', 'threads')),
+          '--mode', 'learn']
+
+    #entrypoint=['/bin/bash']
+
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro': False },
+        base_path + '/custom-models': { 'bind': '/home/de/data/custom-models', 'ro': False },
+        config.get('jamie-learn','jars_path'): {'bind': '/home/de/jars', 'ro':True}
+    }
+    add_tmp_bind(binds)
+
+    links={}
+    add_rabbitmq_link(links)
+    add_postgresql_link(links)
+    add_zookeeper_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='jamie-learn'
+
+    # create container
+    d.create_container('kira-ml',
+                       name=cname,
+                       hostname=hostname,
+                       host_config=host_config,
+                       volumes=['/home/de/data/model-tmp'],
+                       #networking_config=networking_config,
+                       environment=env,
+                       entrypoint=entrypoint,
+                       detach=True)
+
+    d.start(cname)
+
+def init_jamie_export():
+    cname = 'jamie-export'
+    print "Initializing " + cname
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = zookeeper_env(env)
+    env = postgresql_env(env)
+
+    env['LOG_FILE'] = '/home/de/log/' + cname + '.log'
+
+    if has_option('jamie-export', 'max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('jamie-export', 'max_pool_size')
+
+    env = common_conf_env('jamie-export', env)
+
+    if find_container(cname):
+        print 'Skipping: ' + cname + ' is already initialized.'
+        return
+
+    # adjust entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('jamie-export', 'max_heap')),
+          '-Xmx' + str(config.get('jamie-export', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',# restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/jamie_export_oom_dump.hprof',
+          '-Dfile.encoding=UTF-8',
+          '-Djava.library.path=/usr/local/lib/jni/',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.jamie.jar',
+          'de.jamie.core',
+          '--data', '/home/de/data',
+          '--threads', str(config.getint('jamie-export', 'threads')),
+          '--mode', 'export']
+
+
+
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        config.get('jamie-export','jars_path'): {'bind': '/home/de/jars', 'ro':True}
+    }
+
+    add_tmp_bind(binds)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='jamie-export'
+    
+    # create container
+    d.create_container('jamie',
+                       name=cname,
+                       hostname=hostname,
+                       host_config=host_config,
+                       volumes=['/home/de/data/model-tmp'],
+                       #networking_config=networking_config,
+                       environment=env,
+                       entrypoint=entrypoint,
+                       detach=True)
+
+    d.start(cname)
+
+def init_preconvert():
+    cname = 'preconvert'
+    print "Initializing " + cname
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = zookeeper_env(env)
+    env = postgresql_env(env)
+
+    env['LOG_FILE'] = '/home/de/log/' + cname + '.log'
+
+    env = common_conf_env('preconvert', env)
+
+    if find_container(cname):
+        print 'Skipping: ' + cname + ' is already initialized.'
+        return
+
+    # entrypoint - hardcoded jar from R26 so previous ones can be running
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('preconvert', 'max_heap')),
+          '-Xmx' + str(config.get('preconvert', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',# restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/'+cname+'_oom_dump.hprof',
+          '-Dfile.encoding=UTF-8',
+          '-Djava.library.path=/usr/local/lib/jni/',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.jamie-19.2-standalone.jar',
+          'de.jamie.core',
+          '--data', '/home/de/data',
+          '--mode', 'convert',
+          '--convert-mode', 'to-preconvert']
+
+ 
+
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        base_path + '/model-cache': { 'bind': '/home/de/data/model-tmp', 'ro':False },
+        config.get('preconvert','jars_path'): {'bind': '/home/de/jars', 'ro':True}
+    }
+    add_tmp_bind(binds)
+
+    links = {}
+    add_rabbitmq_link(links)
+    add_postgresql_link(links)
+    add_zookeeper_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='preconvert'
+
+   # create container
+    d.create_container(config.get('preconvert', 'image'),
+                       name=cname,
+                       hostname=hostname,
+                       host_config=host_config,
+                       environment=env,
+                       #networking_config=networking_config,
+                       entrypoint=entrypoint,
+                       detach=True)
+
+    # start container  
+    d.start(cname)
+
+# nginx config
+def init_nginx():
+    print "Initializing nginx"
+    if find_container('nginx'):
+        print 'Skipping: nginx is already initialized.'
+        return
+
+    entrypoint=['/usr/sbin/nginx']
+
+    volumes=['/var/cache']
+    binds={base_path + '/ssl': { 'bind': '/etc/nginx/ssl', 'ro':True }}
+    port_binds={443:443, 80:80}
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+    #links={'web':'web'}
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        port_bindings=port_binds,
+        #links=links,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+    #networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='nginx'
+  
+# create container
+
+    d.create_container('nginx',
+                       name='nginx',
+                       entrypoint=entrypoint,
+                       host_config=host_config,
+                       #networking_config=networking_config,
+                       volumes=volumes,
+                       ports=[80,443],
+                       detach=True)
+# web config
+def init_web():
+    print "Initializing web"
+    env = {}
+    env = rabbitmq_env(env)
+    env = postgresql_env(env)
+
+    env['DE_URL'] = config.get('web','url')
+    env['USE_EXPORTER'] = config.get('web','separate_export')
+
+    if has_option('web', 'max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('web', 'max_pool_size')
+
+    if config.getboolean('web','include_scheduler'):
+        env['DISABLE_SCHEDULER'] = 'false'
+    else:
+        env['DISABLE_SCHEDULER'] = 'true'
+
+    if config.getboolean('jamie-export','enabled'):
+        env['USE_EXPORTER']='true'
+    if config.getboolean('web','domain_dispatch'):
+        env['FIRM_DISPATCH']='server-domain'
+    #env['DE_HOSTED']='1'
+
+    if config.getboolean('web','send_email'):
+        env['SMTP_HOST'] = config.get('web','smtp_host')
+        if has_option('web','smtp_port'):
+            env['SMTP_PORT'] = config.get('web','smtp_port')
+        if has_option('web','smtp_user'):
+            env['SMTP_USER'] = config.get('web','smtp_user')
+        if has_option('web','smtp_pass'):
+            env['SMTP_PASS'] = config.get('web','smtp_pass')
+        if has_option('web','smtp_email'):
+            env['SMTP_EMAIL'] = config.get('web','smtp_email')
+        if has_option('web','smtp_ssl'):
+            env['SMTP_SSL'] = config.getboolean('web','smtp_ssl')
+
+    env = common_conf_env('web', env)
+
+    if find_container('web'):
+        print 'Skipping: web is already initialized.'
+        return
+
+    # entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('web', 'max_heap')),
+          '-Xmx' + str(config.get('web', 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',# restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/web_oom_dump.hprof',
+          '-Dfile.encoding=UTF-8',
+          '-Djava.endorsed.dirs=endorsed',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/kira.sdk.jar',
+          'kira.sdk.core']
+
+
+
+    # Should second one be added only on check?
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        base_path + '/ssl': { 'bind': '/home/de/ssl', 'ro':True},
+        config.get('web','jars_path'): { 'bind': '/home/de/jars', 'ro':True }
+    }
+    add_tmp_bind(binds)
+
+    if has_option('web','mdr_path'):
+        binds[config.get('web','mdr_path')]={'bind': '/mdr', 'ro':True}
+
+    if has_option('web:env','saml_sso'):
+        binds[base_path + '/sso-keys']={'bind': '/home/de/keys', 'ro':True}
+
+    port_binds={8443:config.get('web','port')}
+    if config.getboolean('web','use_nginx'):
+        port_binds={}
+
+    links={}
+    add_rabbitmq_link(links)
+    add_postgresql_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        port_bindings=port_binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='web'
+
+    # create container
+    d.create_container('web',
+                       name='web',
+                       entrypoint=entrypoint,
+                       hostname=hostname,
+                       host_config=host_config,
+                       environment=env,
+                       #networking_config=networking_config,
+                       ports=[8443],
+                       detach=True)
+
+    d.start('web')
+
+    if config.getboolean('web', 'use_nginx'):
+        init_nginx()
+
+# cluster config
+def init_cluster():
+    cname = 'cluster'
+    print "Initializing " + cname
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = postgresql_env(env)
+
+    if has_option('cluster', 'max_pool_size'):
+        env['MAX_POOL_SIZE'] = config.get('cluster', 'max_pool_size')
+
+    if find_container(cname):
+        print 'Skipping: ' + cname + ' is already initialized.'
+        return
+
+    env['LOG_FILE'] = '/home/de/log/cluster.log'
+
+    env = common_conf_env('cluster', env)
+
+    # If local, add links
+    links = {}
+    add_postgresql_link(links)
+    add_rabbitmq_link(links)
+
+    # entrypoint
+    entrypoint = ['/usr/bin/java',
+                  '-server',
+                  '-Xms' + str(config.get('cluster', 'max_heap')),
+                  '-Xmx' + str(config.get('cluster', 'max_heap')),
+                  '-XX:+AggressiveOpts',
+                  '-XX:+UseG1GC',
+                  '-XX:+UseStringDeduplication',
+                  '-XX:OnOutOfMemoryError=/bin/kill -9 %p',
+                  '-XX:+HeapDumpOnOutOfMemoryError',
+                  '-XX:HeapDumpPath=/home/admin/log/cluster_oom_dump.hprof'
+                  '-Dfile.encoding=UTF-8',
+                  '-Djava.library.path=/usr/local/lib/jni/',
+                  '-cp', '/home/de/jars/cluster.jar:/home/de/jars/kira.configuration-1.0.jar',
+                  'cluster.core',
+                  '--data', '/home/de/data']
+ 
+    # setup binds
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        config.get('cluster','jars_path'): { 'bind': '/home/de/jars', 'ro':True }
+    }
+    add_tmp_bind(binds)
+
+    links={}
+    add_rabbitmq_link(links)
+    add_postgresql_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+    
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='cluster'
+
+   # create container
+    d.create_container('cluster',
+                       name=cname,
+                       host_config=host_config,
+                       hostname=hostname,
+                       #networking_config=networking_config,
+                       environment=env,
+                       entrypoint=entrypoint,
+                       detach=True)
+
+    d.start('cluster')
+
+
+# reporting config
+def init_reporting():
+    cname = 'reporting'
+    print "Initializing reporting"
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = postgresql_env(env)
+
+    # CLOUD_NAME=Beta Cloud
+    # HUBSPOT_API_URL=https://api.hubapi.com
+    # HUBSPOT_API_TOKEN=
+
+    env['LOG_FILE'] = '/home/de/log/' + cname + '.log'
+
+    env['CLOUD_NAME']        = config.get('reporting','cloud_name')
+    env['HUBSPOT_API_TOKEN'] = config.get('reporting','hubspot_api_token')
+    if has_option('reporting','hubspot_api_url'):
+        env['HUBSPOT_API_URL']   = config.get('reporting','hubspot_api_url')
+
+    env = common_conf_env(cname, env)
+
+    if find_container(cname):
+        print 'Skipping: reporting is already initialized.'
+        return
+
+    # adjust entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get(cname, 'max_heap')),
+          '-Xmx' + str(config.get(cname, 'max_heap')),
+          '-Dfile.encoding=UTF8',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/kira.reporting.jar',
+          'kira.reporting.core']
+
+
+    # Should second one be added only on check?
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        config.get(cname,'jars_path'): { 'bind': '/home/de/jars', 'ro':True }
+    }
+    add_tmp_bind(binds)
+
+    links={}
+    add_postgresql_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)    
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='reporting'
+
+    # create container
+    d.create_container('jamie',
+                       name=cname,
+                       hostname=hostname,
+                       host_config=host_config,
+                       #networking_config=networking_config,
+                       entrypoint=entrypoint,
+                       environment=env,
+                       detach=True)
+
+    d.start(cname)
+
+
+# analytics collector config
+def init_analytics():
+    cname = 'analytics'
+    print "Initializing analytics collector"
+
+    env = { 'LOG_FILE': '/home/de/log/' + cname + '.log' }
+    env = rabbitmq_env(env)
+    env = zookeeper_env(env)
+    env = postgresql_env(env)
+    env = elastic_env(env)
+
+    deployment_id = get_opt(cname, 'deployment_id', None)
+    if not deployment_id:
+        print 'The "deployment_id" parameter is not configured.  Skipping...'
+        return
+        
+    env['APC_DEPLOYMENT_ID'] = deployment_id
+    
+    env = common_conf_env(cname, env)
+
+    if find_container(cname):
+        print 'Skipping: reporting is already initialized.'
+        return
+
+    # adjust entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get(cname, 'max_heap')),
+          '-Xmx' + str(config.get(cname, 'max_heap')),
+          '-XX:+AggressiveOpts',
+          '-XX:+UseG1GC',
+          '-XX:+UseStringDeduplication',
+          '-XX:OnOutOfMemoryError=/bin/kill -9 %p',# restart and dump on OOM
+          '-XX:+HeapDumpOnOutOfMemoryError',
+          '-XX:HeapDumpPath=/home/de/log/web_oom_dump.hprof',
+          '-Dfile.encoding=UTF-8',
+          '-Djava.endorsed.dirs=endorsed',
+          '-Djava.library.path=/usr/local/lib/jni/',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.ap-collector.jar',
+          'de.ap_collector.core',
+          'service']
+
+
+
+    # Should second one be added only on check?
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        config.get(cname,'jars_path'): { 'bind': '/home/de/jars', 'ro':True }
+    }
+    add_tmp_bind(binds)
+
+    links={}
+    add_postgresql_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+#    networking_config=d.create_networking_config({ 'kira-net': d.create_endpoint_config()})
+
+    hostname='analytics'
+
+    # create container
+    d.create_container('analytics',
+                       name=cname,
+                       hostname=hostname,
+                       host_config=host_config,
+                       #networking_config=networking_config,
+                       entrypoint=entrypoint,
+                       environment=env,
+                       detach=True)
+
+    d.start('analytics')
+
+
+# admin config
+def init_admin():
+    print "Initializing admin"
+
+    env = {}
+    env = rabbitmq_env(env)
+    env = postgresql_env(env)
+
+    if find_container('admin'):
+        print 'Skipping: admin is already initialized.'
+        return
+
+    # adjust entrypoint
+    entrypoint = ['/usr/bin/java',
+          '-server',
+          '-Xms' + str(config.get('admin', 'max_heap')),
+          '-Xmx' + str(config.get('admin', 'max_heap')),
+          '-Dfile.encoding=UTF8',
+          '-cp', '/home/de/jars/kira.configuration.jar:/home/de/jars/de.admin.jar',
+          'de.admin.core']
+
+    host_config=d.create_host_config(
+            binds=binds,
+            port_bindings=port_binds,
+            links=links,
+            restart_policy=restart_policy,
+            extra_hosts=extra_hosts)
+
+    # create container
+    d.create_container('admin',
+                       name='admin',
+                       hostname=hostname,
+                       host_config=host_config,
+                       entrypoint=entrypoint,
+                       environment=env,
+                       ports=[9090,9443],
+                       detach=True)
+
+    # Should second one be added only on check?
+    binds = {
+        base_path + '/log': { 'bind': '/home/de/log', 'ro':False },
+        base_path + '/ssl': { 'bind': '/home/de/ssl', 'ro':True },
+        config.get('admin','jars_path'): { 'bind': '/home/de/jars', 'ro':True }
+    }
+    add_tmp_bind(binds)
+
+    port_binds={9090:9090,9443:9443}
+
+    links={}
+    add_postgresql_link(links)
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    d.start('admin')
+
+def firm_db_pw_gen():
+    choice = random.SystemRandom().choice
+    pool = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    pw = ''
+    for _ in range(50):
+        pw += choice(pool)
+    return pw
+
+# postgresql config
+def init_postgresql():
+    print "Initializing postgresql"
+    if find_container('postgresql'):
+        print 'Skipping: postgresql is already initialized.'
+        return
+
+    # Commenting for now as we don't use pgpool on self-host setups, and never containerized in ours
+    #if find_container('pgpool'):
+    #    d.stop('pgpool')
+    #    d.remove_container('pgpool')
+
+    # all of these env vars are for the initial DB setup, excepting SUPER*
+    #
+    # FIRM_NAME --- Actual name of the firm
+    # FIRM_EMAIL_DOMAIN --- internet domain used for their email addresses
+    # FIRM_DATABASE_NAME --- usually 'de_' + re_replace(domain, '.', '_')
+    # FIRM_DATABASE_PASSWORD --- randomly generated and used only internally; only needed at initialization
+    #
+    env = {
+        'DE_ADM_USER': 'de',
+        'DE_ADM_PASS': config.get('postgresql','password'),
+        'FIRM_ADM_USER': 'de_firmadm',
+        'FIRM_ADM_PASS': config.get('postgresql','admin_password'),
+
+        'FIRM_NAME': 'Kira Systems',
+        'FIRM_EMAIL_DOMAIN': 'kirasystems.com',
+        'FIRM_DATABASE_NAME': 'de_kirasystems_com',
+        'FIRM_DATABASE_PASSWORD': firm_db_pw_gen(),
+
+        'SUPERUSER': 'desu',
+        'SUPERPASS': 'desu_password'
+    }
+    try:
+        for k,v in config.items('postgresql:env'):
+            env[k.upper()] = v
+    except ConfigParser.NoSectionError:
+        pass
+
+    # entrypoint
+    entrypoint = [ '/dbhome/de_pg_run.sh' ]
+
+
+
+    binds={
+      base_path + '/pgdata': { 'bind': '/pgdata', 'ro':False },
+      base_path + '/backup': { 'bind': '/backup', 'ro':False }
+    }
+    # port_binds = {5432:5432}
+    port_binds = {5432:9999}
+    # comment out to expose db locally
+    if config.getboolean('postgresql','local'):
+        port_binds = {}
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    host_config=d.create_host_config(
+        ulimits=[{'name':'core', 'soft':0, 'hard':0}],
+        binds=binds,
+        links=links,
+        restart_policy=restart_policy,
+        extra_hosts=extra_hosts)
+
+    # create container
+    d.create_container('postgresql',
+                       name='postgresql',
+                       entrypoint=entrypoint,
+                       ports=[5432],
+                       environment=env,
+                       detach=True)
+
+    d.start('postgresql',
+            binds=binds,
+            port_bindings=port_binds,
+            restart_policy=restart_policy,
+            extra_hosts=extra_hosts)
+
+
+# migration config using the postgresql container
+def init_migration():
+    print "Initializing migration container"
+    if find_container('migration'):
+        print 'Skipping: postgresql is already initialized.'
+        return
+
+    # Extra env specifc.
+    env = {}
+    try:
+        for k,v in config.items('postgresql:env'):
+            env[k.upper()] = v
+    except ConfigParser.NoSectionError:
+        pass
+
+    binds={ base_path + '/migrations/sql' : { 'bind': '/dbhome/flyway/sql/', 'mode':'ro' } }
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    # create container
+    host_config=d.create_host_config(binds=binds, extra_hosts=extra_hosts)
+
+    d.create_container('postgresql',
+                       name='migration',
+                       entrypoint=['/bin/bash'],
+                       environment=env,
+                       host_config=host_config,
+                       detach=False,
+                       stdin_open=True,
+                       tty=True)
+
+    print "You can actually use the container with docker start -i migration"
+
+# performs migration when sql is in image and db is stand-alone
+def init_onprem_migration():
+    print "Initializing migration container"
+    if find_container('migration'):
+        print 'Skipping: migratin container is already initialized.'
+        return
+
+    # Extra env specifc.
+    env = {
+        'HOST': config.get('general','hostname'),
+        'DB_SERVER': config.get('postgresql','uri'),
+        'FIRM_ADM_USER': 'de_firmadm',
+        'FIRM_ADM_PASS': config.get('postgresql','admin_password'),
+    }
+
+    # add MIGRATE_COMMAND (migrate|validate) in common.conf [postgresql:env]
+    # if not present defaults to migrate
+    try:
+        for k,v in config.items('postgresql:env'):
+            env[k.upper()] = v
+    except ConfigParser.NoSectionError:
+        pass
+
+    extra_hosts={}
+    add_extra_hosts(extra_hosts)
+
+    # create container
+    d.create_container('migration',
+                       name='migration',
+                       entrypoint=['/dbhome/de_pg_run.sh'],
+                       environment=env,
+                       detach=False,
+                       stdin_open=True,
+                       tty=True)
+
+    d.start('migration',
+            restart_policy=restart_policy,
+            extra_hosts=extra_hosts)
+
+init_fn={
+    'rabbitmq': init_rabbitmq,
+    'zookeeper': init_zookeeper,
+    'scheduler': init_scheduler,
+    'doc-converter': init_doc_converter,
+    'jamie': init_jamie,
+    'jamie-learn': init_jamie_learn,
+    'jamie-export': init_jamie_export,
+    'preconvert': init_preconvert,
+    'web': init_web,
+    'cluster': init_cluster,
+    'reporting': init_reporting,
+    'analytics': init_analytics,
+    'admin': init_admin,
+    'postgresql': init_postgresql,
+    'migration': init_migration,
+    'onprem-migration': init_onprem_migration
+}
+
+startup_order = ['postgresql','rabbitmq','zookeeper','scheduler','web', 'doc-converter','jamie','jamie-learn','jamie-export', 'cluster', 'reporting', 'analytics', 'admin']
+
+def init_module(id):
+    try:
+        init_fn[id]()
+    except KeyError:
+        print "Invalid module:" + id
+
+def init(args):
+    if args.module == 'all':
+        for key in startup_order:
+            if config.getboolean(key,'enabled'):
+                init_module(key)
+        return
+    else:
+        init_module(args.module)
+
+def start_container(id):
+    print "Starting container: " + id
+    try:
+        container = d.inspect_container(id)
+        d.restart(container)
+    except docker.errors.APIError:
+        pass
+
+def start_module(id):
+    if id == 'web':
+        start_container('web')
+        start_container('nginx')
+    else:
+        start_container(id)
+
+def start(args):
+    if args.module == 'all':
+        for key in startup_order:
+            if config.getboolean(key,'enabled'):
+                start_module(key)
+        return
+    else:
+        start_module(args.module)
+
+def clean_container(id):
+    if find_container(id):
+        print "Stopping and removing container: " + id
+        try:
+            d.stop(id,timeout=120)
+            d.remove_container(container=id,v=True)
+        except docker.errors.APIError:
+            pass
+    else:
+        print "Container doesn't exist: " + id
+
+def clean_module(id):
+    if id == 'postgresql':
+        clean_container('pgpool')
+        clean_container('postgresql')
+    elif id == 'web':
+        clean_container('nginx')
+        clean_container('web')
+    elif id == 'rabbitmq':
+        # Stopping RMQ this way actually causes a container restart
+        if find_container(id):
+            if is_running(id):
+                rabbitmqctl(['stop'])
+            clean_container(id)
+    else:
+        clean_container(id)
+
+def clean(args):
+    if args.module == 'all':
+        for key in reversed(startup_order):
+            if config.getboolean(key,'enabled'):
+                clean_module(key)
+        return
+    else:
+        clean_module(args.module)
+
+def rabbitmqctl_cmd(args):
+    rabbitmqctl(args.cmd, output=True)
+
+def version_cmd(args):
+    print "Version " + version
+
+
+parser = argparse.ArgumentParser(description='Control and configure Kira app modules')
+subparsers = parser.add_subparsers()
+
+init_p = subparsers.add_parser('init')
+init_p.add_argument('module')
+init_p.set_defaults(func=init)
+
+start_p = subparsers.add_parser('start')
+start_p.add_argument('module')
+start_p.set_defaults(func=start)
+
+start_p = subparsers.add_parser('clean')
+start_p.add_argument('module')
+start_p.set_defaults(func=clean)
+
+start_p = subparsers.add_parser('rabbitmqctl')
+start_p.add_argument('cmd', metavar='CMD', nargs='+', help="rabbitmqctl command and arguments")
+start_p.set_defaults(func=rabbitmqctl_cmd)
+
+start_p = subparsers.add_parser('version')
+start_p.set_defaults(func=version_cmd)
+
+args = parser.parse_args()
+args.func(args)

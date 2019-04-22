@@ -1,0 +1,142 @@
+----------------------------------------------------------------------
+On Wed, May 16, 2018 at 1:57 PM Albert Fung <albert.fung@kirasystems.com> wrote:
+Hi Jonathan,
+1.     We’re not sure what you mean by ‘external DNS’; but assuming the 
+        question is if you can configure eth0 to be using DHCP 
+        rather than manually and have DHCP configure the DNS, 
+        then that would not be a problem. 
+
+2a.     Regarding the ‘backend’ question, you will need to 
+        replace ‘backend’ with the actual name of the DB/RMQ/ZK hosts. 
+        This entry is required on all nodes that need to connect to 
+        the three specific services, otherwise it won’t know what to connect to.
+
+2b.     Regarding the ‘local=false’ question, this setting should be left as is.
+
+Regards,
+Albert
+----------------------------------------------------------------------
+On Tue, May 15, 2018 at 5:08 PM Lagman, Jonathan (US - Tampa) <jlagman@deloitte.com> wrote:
+Hi Albert,
+Attached is the reference document that I’m following to set-up an on-prem cluster and I’d like to clarify a few points:
+1.      Can I use an external DNS system to avoid modifying the local configuration on a node (page 7).  
+        
+        Configure Networking
+        1. Edit the /etc/sysconfig/network-scripts/ifcfg-eth0 file and add the name server(s)
+            IP address(es) in the DNS1 (DNS2) line(s).
+            a.       DNS1=xxx.xx.xxx.xx3
+
+2.       Page 8, ties into the previous email I sent around how the 
+            common.conf and a node.conf 
+            would be set-up to achieve a distributed cluster
+    
+    Configure common.conf
+        Edit the /opt/kira/config/common.conf file making the following changes.
+        [extra_hosts]
+        #kira= (comment out this line)
+        [rabbit]
+        nodes=backend     -> ideally a DNS name that resolves to a rabbitmq-node, 
+                            e.g. dev-americas-backend-node1, dev-americas- backend -node2,++
+        [zookeeper]
+        nodes=backend     -> ideally a DNS name that resolves to a zookeeper-node, 
+                            e.g. dev-americas- backend-node1, dev-americas-backend-node2,++
+        [postgresql]            
+        uri=//backend:5432 -> given that postgresql will be on a dedicated node, 
+                            it’ll have a DNS entry for other nodes to resolve to, 
+                            is this entry needed for all nodes connecting to Postgres? 
+    
+        [KIRA] 
+        2a.     Regarding the ‘backend’ question, you will need to replace ‘backend’ with 
+                the actual name of the DB/RMQ/ZK hosts. 
+                This entry is required on all nodes that need to connect to 
+                the three specific services, otherwise it won’t know what to connect to.
+        
+
+    Assuming the configuration beneath is a backend-node running rabbit and zookeeper, 
+        why would ‘local=false’ be set, woudn’t this be ‘local=true’? 
+
+        Configure node.conf
+            Edit the /opt/kira/config/node.conf file making the following changes.
+            [general]
+            # The domain name of this host
+            hostname=backend  
+            [rabbitmq]     
+            enabled=true 
+            local=false
+            [zookeeper]
+            enabled=true
+            local=false
+    
+        [KIRA] 
+        2b.   Regarding the ‘local=false’ question, 
+                this setting should be left as is.
+
+    ---------------- RESULT ------------------------
+    # All files
+    ----------------------------------------------------------------------
+    * Set `local=false` 
+        --- this does not mean what you think it does 
+        (it's a legacy param that we don't use anymore)
+        * `WORKAROUND_HTML_REPLACEMENT_TS` 
+        does not need to be set (this only affects legacy databases, 
+        and this isn't one, and as a SDK instance, it _definitely_ isn't one)
+
+    ----------------------------------------------------------------------
+    # All node.conf files
+    ----------------------------------------------------------------------
+        * Set `hostname=local-shortname`; 
+        e.g. `hostname=web1` or `hostname=db-us-dc1`.  Do not use FQDN.
+
+    ----------------------------------------------------------------------
+    # All common.conf files
+    ----------------------------------------------------------------------
+        * Set `use_nginx=false` --- I doubt you're using it anyway, but turn it off
+
+    ----------------------------------------------------------------------
+    # common.backend.conf
+    ----------------------------------------------------------------------
+        * I suggest deleting the [jamie], [jamie-learn], [jamie-export], [doc-converter], 
+        and [cluster] (and corresponding :env) sections, as you're not running those on that node.
+    ----------------------------------------------------------------------
+    # *.pg.conf
+    ----------------------------------------------------------------------
+        * If you configure kira.cmd to run on some other node (such as a worker node), then these can go away outright.  
+        The kira.cmd jar is used to load provisions, classifiers, and create API tokens, etc, 
+        but it does not need to be run on the same host as the DB itself.  
+        It may be run (at least in theory) on any host with a correct common.conf
+
+    ----------------------------------------------------------------------
+    # node.webapi.conf
+    ----------------------------------------------------------------------
+    * Delete [admin] and [reporting] sections 
+    --- they're not applicable to your environment
+    * `debug_saml` in [web:env] can likely be removed 
+    --- I doubt you're using SAML SSO with SDK (and I don't know if that combo would work)
+    * Also not sure if `DELOITTE_NODE_ID` is used by SDK
+
+    ----------------------------------------------------------------------
+    # common.webapi.conf
+    ----------------------------------------------------------------------
+        * Set `include_scheduler=false` in [web]
+        * Set `domain_dispatch=false` --- I do not believe this feature 
+            is relevant in SDK mode, and am unsure of the interaction of feature here
+        * Remove [scheduler], [jamie], [jamie-learn], [jamie-export], 
+            [doc-converter], and [cluster] (and corresponding :env) sections
+
+    ----------------------------------------------------------------------
+    # node.worker.conf
+    ----------------------------------------------------------------------
+        * You will mostly likely want to specialize worker nodes 
+        to only one of the components each; running all four 
+        components on a single worker is not a great idea.  
+        So, set `enabled=false` for the three components not 
+        being run on a given worker node.
+        
+    ----------------------------------------------------------------------
+    # common.worker.conf
+    ----------------------------------------------------------------------
+        * Remove the [web], [scheduler], [cluster], and corresponding :env sections
+        * Set `max_pool_size` to 2n+1, where `threads=n`
+        * Set `max_heap` to approx 75% of available RAM on the worker node
+        * Set `threads` to the number of CPUs available on the worker node
+

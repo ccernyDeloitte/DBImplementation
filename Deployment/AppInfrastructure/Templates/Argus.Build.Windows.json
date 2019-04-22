@@ -1,0 +1,529 @@
+﻿{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Application": {
+      "metadata": {
+        "description": "1Description of what application this VM is used for.  The tag 'Application' will be set to this value."
+      },
+      "type": "string"
+    },
+    "DevOpsStorageAccountAccessKey": {
+      "type": "securestring"
+    },
+    "DevOpsStorageAccountName": {
+      "type": "string"
+    },
+    "Domain": {
+      "type": "string"
+    },
+    "EnvironmentId": {
+      "type": "string"
+    },
+    "Location": {
+      "type": "string"
+    },
+    "Offer": {
+      "type": "string"
+    },
+    "OMSResourceGroup": {
+      "type": "string"
+    },
+    "OMSSubscriptionID": {
+      "type": "string"
+    },
+    "OMSWorkspaceName": {
+      "type": "string"
+    },
+    "OrganizationalUnit": {
+      "type": "string"
+    },
+    "PodDomainServicePassword": {
+      "type": "securestring"
+    },
+    "PodDomainServiceUser": {
+      "type": "string"
+    },
+    "Publisher": {
+      "type": "string"
+    },
+    "ServerCount": {
+      "type": "int"
+    },
+    "ServerNames": {
+      "type": "array"
+    },
+    "Sku": {
+      "type": "string"
+    },
+    "StarsLifeCycle": {
+      "type": "string"
+    },
+    "StarsPOD": {
+      "type": "string"
+    },
+    "SubnetRef": {
+      "type": "string"
+    },
+    "TimeZone": {
+      "type": "string"
+    },
+    "Version": {
+      "type": "string"
+    },
+    "VirtualMachineSize": {
+      "type": "string",
+      "defaultValue": "Standard_F4s"
+    },
+    "VmAdminPassword": {
+      "type": "securestring"
+    },
+    "VmAdminUsername": {
+      "type": "string"
+    },
+    "TagsBillingCode": {
+      "type": "string"
+    },
+    "TagsContacts": {
+      "type": "string"
+    },
+    "TagsMemberFirm": {
+      "type": "string"
+    },
+    "TagsFunction": {
+      "type": "string"
+    },
+    "TagsCS": {
+      "type": "string"
+    },
+    "TagsAppID": {
+      "type": "string"
+    },
+    "TagsRequestID": {
+      "type": "string"
+    },
+    "TagsAddendum": {
+      "type": "string"
+    },
+    "sequenceVersion": {
+      "type": "string",
+      "defaultValue": "1.0",
+      "metadata": {
+        "description": "Pass in an unique value like a GUID everytime the operation needs to be force run"
+      }
+    },
+    "volumeType": {
+      "type": "string",
+      "defaultValue": "All",
+      "metadata": {
+        "description": "Type of the volume OS or Data to perform encryption operation"
+      }
+    },
+    "keyVaultResourceID": {
+      "metadata": {
+        "description": "KeyVault resource id. Ex: /subscriptions/9135e259-1f76-4dbd-a5c8-bc4fcdf3cf1c/resourceGroups/DiskEncryptionTest/providers/Microsoft.KeyVault/vaults/DiskEncryptionTestAus"
+      },
+      "type": "string"
+    },
+    "aadClientID": {
+      "type": "string",
+      "metadata": {
+        "description": "Client ID of AAD app which has permissions to KeyVault"
+      }
+    },
+    "aadClientSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Client Secret of AAD app which has permissions to KeyVault"
+      }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the KeyVault to place the volume encryption key"
+      }
+    },
+    "keyVaultResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group of the KeyVault"
+      }
+    },
+    "keyEncryptionKeyURL": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "URL of the KeyEncryptionKey used to encrypt the volume encryption key"
+      }
+    },
+    "existingVirtualMachinesResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group where the virtual machines are located. This can be different than resource group of the vault. "
+      }
+    },
+    "existingRecoveryServicesVault": {
+      "type": "string",
+      "metadata": {
+        "description": "Recovery services vault name where the VMs will be backed up to. "
+      }
+    },
+    "existingRecoveryServicesVaultRG": {
+      "type": "string",
+      "metadata": {
+        "description": "Recovery services vault name where the VMs will be backed up to. "
+      }
+    },
+    "existingBackupPolicy": {
+      "type": "string",
+      "defaultValue": "DefaultPolicy",
+      "metadata": {
+        "description": "Backup policy to be used to backup VMs. Backup POlicy defines the schedule of the backup and how long to retain backup copies. By default every vault comes with a 'DefaultPolicy' which canbe used here."
+      }
+    }
+  },
+  "variables": {
+    "OMSResourceID": "[resourceId(parameters('OMSSubscriptionId'), parameters('OMSResourceGroup'), 'Microsoft.OperationalInsights/workspaces/', parameters('OMSWorkspaceName'))]",
+    "Description": "[concat(parameters('EnvironmentId'),' Argus Build Server')]",
+    "keyVaultURL": "[concat('https://', parameters('keyVaultName'), '.vault.azure.net/')]",
+    "extensionName": "AzureDiskEncryption",
+    "extensionVersion": "1.1",
+    "encryptionOperation": "EnableEncryption",
+    "keyEncryptionAlgorithm": "RSA-OAEP",
+    "backupFabric": "Azure",
+    "v2VmType": "Microsoft.Compute/virtualMachines",
+    "v2VmContainer": "iaasvmcontainer;iaasvmcontainerv2;",
+    "v2Vm": "vm;iaasvmcontainerv2;"
+  },
+  "resources": [
+    {
+      "name": "[parameters('ServerNames')[copyIndex()]]",
+      "tags": {
+        "AppID": "[parameters('TagsAppID')]",
+        "BILLINGCODE": "[parameters('TagsBillingCode')]",
+        "CONTACTS": "[parameters('TagsContacts')]",
+        "CS": "[parameters('TagsCS')]",
+        "FUNCTION": "[parameters('TagsFunction')]",
+        "MEMBERFIRM": "[parameters('TagsMemberFirm')]",
+        "ADDENDUM": "[parameters('TagsAddendum')]",
+        "REQUESTID": "[parameters('TagsRequestID')]"
+      },
+      "copy": {
+        "name": "BuildServerCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2016-04-30-preview",
+      "location": "[parameters('Location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkInterfaces/',concat(parameters('ServerNames')[copyIndex()],'-nic'))]"
+      ],
+      "properties": {
+        "licenseType": "Windows_Server",
+        "osProfile": {
+          "computerName": "[parameters('ServerNames')[copyIndex()]]",
+          "adminUsername": "[parameters('VmAdminUsername')]",
+          "adminPassword": "[parameters('VmAdminPassword')]",
+          "windowsConfiguration": {
+            "provisionVmAgent": "true"
+          }
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('VirtualMachineSize')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[parameters('Publisher')]",
+            "offer": "[parameters('Offer')]",
+            "sku": "[parameters('Sku')]",
+            "version": "[parameters('Version')]"
+          },
+          "osDisk": {
+            "name": "[concat(parameters('ServerNames')[copyIndex()],'-osdisk')]",
+            "createOption": "fromImage",
+            "caching": "ReadWrite"
+          },
+          "dataDisks": [
+            {
+              "lun": 0,
+              "managedDisk": {
+                "id": "[resourceId('Microsoft.Compute/disks', concat(parameters('ServerNames')[copyIndex()],'-datadisk1'))]"
+              },
+              "caching": "None",
+              "createOption": "Attach"
+            }
+          ]
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('ServerNames')[copyIndex()],'-nic'))]"
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "name": "CustomScript",
+          "type": "extensions",
+          "location": "[parameters('Location')]",
+          "tags": {
+            "AppID": "[parameters('TagsAppID')]",
+            "BILLINGCODE": "[parameters('TagsBillingCode')]",
+            "CONTACTS": "[parameters('TagsContacts')]",
+            "CS": "[parameters('TagsCS')]",
+            "FUNCTION": "[parameters('TagsFunction')]",
+            "MEMBERFIRM": "[parameters('TagsMemberFirm')]",
+            "ADDENDUM": "[parameters('TagsAddendum')]",
+            "REQUESTID": "[parameters('TagsRequestID')]"
+          },
+          "apiVersion": "2016-03-30",
+          "dependsOn": [
+            "[resourceId('Microsoft.Compute/virtualMachines', parameters('ServerNames')[copyIndex()])]"
+          ],
+          "tags": {
+            "displayName": "CustomScript"
+          },
+          "properties": {
+            "publisher": "Microsoft.Compute",
+            "type": "CustomScriptExtension",
+            "typeHandlerVersion": "1.8",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "fileUris": [
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/CloudScript.exe')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/firstboot.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/secondboot.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Set-GroupAccess.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Setup-BaseServer.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Configure-WinRM.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/winrmconf.cmd')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Disable-IaaSIESESC.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Setup-HardDrives.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Setup-WebServer.ps1')]"
+              ]
+            },
+            "protectedSettings": {
+              "commandToExecute": "[concat('powershell -ExecutionPolicy Unrestricted -file firstboot.ps1 -Domain ', parameters('Domain'),' -OrganizationalUnit ',parameters('OrganizationalUnit'),' -PodDomainServiceUser ',parameters('PodDomainServiceUser'),' -PodDomainServicePassword ',parameters('PodDomainServicePassword'),' -Environment ',parameters('EnvironmentId'),' -Description ',variables('Description'),' -ServerType BUILD', ' -StarsPod ',parameters('StarsPOD'), add(mod(copyIndex(),3),1), ' -TimeZone \"', parameters('TimeZone'), '\" -starsLifeCycle \"', parameters('StarsLifeCycle'),'\"')]",
+              "storageAccountName": "[parameters('DevOpsStorageAccountName')]",
+              "storageAccountKey": "[parameters('DevOpsStorageAccountAccessKey')]"
+            }
+          }
+        },
+        {
+          "type": "extensions",
+          "name": "MicrosoftMonitoringAgent",
+          "apiVersion": "2015-06-15",
+          "location": "[parameters('Location')]",
+          "tags": {
+            "displayName": "Monitoring-OMS",
+            "AppID": "[parameters('TagsAppID')]",
+            "BILLINGCODE": "[parameters('TagsBillingCode')]",
+            "CONTACTS": "[parameters('TagsContacts')]",
+            "CS": "[parameters('TagsCS')]",
+            "FUNCTION": "[parameters('TagsFunction')]",
+            "MEMBERFIRM": "[parameters('TagsMemberFirm')]",
+            "ADDENDUM": "[parameters('TagsAddendum')]",
+            "REQUESTID": "[parameters('TagsRequestID')]"
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Compute/virtualMachines', parameters('ServerNames')[copyIndex()])]"
+          ],
+          "properties": {
+            "publisher": "Microsoft.EnterpriseCloud.Monitoring",
+            "type": "MicrosoftMonitoringAgent",
+            "typeHandlerVersion": "1.0",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "workspaceId": "[reference(variables('OMSResourceID'), '2015-03-20').customerId]"
+            },
+            "protectedSettings": {
+              "workspaceKey": "[listKeys(variables('OMSResourceID'), '2015-03-20').primarySharedKey]"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-datadisk1')]",
+      "copy": {
+        "name": "DiskCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Compute/disks",
+      "apiVersion": "2016-04-30-preview",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "AppID": "[parameters('TagsAppID')]",
+        "BILLINGCODE": "[parameters('TagsBillingCode')]",
+        "CONTACTS": "[parameters('TagsContacts')]",
+        "CS": "[parameters('TagsCS')]",
+        "FUNCTION": "[parameters('TagsFunction')]",
+        "MEMBERFIRM": "[parameters('TagsMemberFirm')]",
+        "ADDENDUM": "[parameters('TagsAddendum')]",
+        "REQUESTID": "[parameters('TagsRequestID')]"
+      },
+      "properties": {
+        "creationData": {
+          "createOption": "Empty"
+        },
+        "accountType": "Premium_LRS",
+        "diskSizeGB": 512
+      }
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-nic')]",
+      "copy": {
+        "name": "NicCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2016-09-01",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "AppID": "[parameters('TagsAppID')]",
+        "BILLINGCODE": "[parameters('TagsBillingCode')]",
+        "CONTACTS": "[parameters('TagsContacts')]",
+        "CS": "[parameters('TagsCS')]",
+        "FUNCTION": "[parameters('TagsFunction')]",
+        "MEMBERFIRM": "[parameters('TagsMemberFirm')]",
+        "ADDENDUM": "[parameters('TagsAddendum')]",
+        "REQUESTID": "[parameters('TagsRequestID')]"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[parameters('SubnetRef')]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'/',variables('extensionName'))]",
+      "copy": {
+        "name": "ADEExtensionCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "apiVersion": "2016-04-30-preview",
+      "dependsOn": [
+        "[parameters('ServerNames')[copyIndex()]]"
+      ],
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "AppID": "[parameters('TagsAppID')]",
+        "BILLINGCODE": "[parameters('TagsBillingCode')]",
+        "CONTACTS": "[parameters('TagsContacts')]",
+        "CS": "[parameters('TagsCS')]",
+        "FUNCTION": "[parameters('TagsFunction')]",
+        "MEMBERFIRM": "[parameters('TagsMemberFirm')]",
+        "ADDENDUM": "[parameters('TagsAddendum')]",
+        "REQUESTID": "[parameters('TagsRequestID')]"
+      },
+      "properties": {
+        "publisher": "Microsoft.Azure.Security",
+        "type": "AzureDiskEncryption",
+        "typeHandlerVersion": "[variables('extensionVersion')]",
+        "autoUpgradeMinorVersion": true,
+        "forceUpdateTag": "[parameters('sequenceVersion')]",
+        "settings": {
+          "AADClientID": "[parameters('aadClientID')]",
+          "KeyVaultURL": "[variables('keyVaultURL')]",
+          "KeyEncryptionKeyURL": "[parameters('keyEncryptionKeyURL')]",
+          "KeyEncryptionAlgorithm": "[variables('keyEncryptionAlgorithm')]",
+          "VolumeType": "[parameters('volumeType')]",
+          "EncryptionOperation": "[variables('encryptionOperation')]"
+        },
+        "protectedSettings": {
+          "AADClientSecret": "[parameters('aadClientSecret')]"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-EncryptVM')]",
+      "type": "Microsoft.Resources/deployments",
+      "copy": {
+        "name": "EncryptVMCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "apiVersion": "2015-01-01",
+      "dependsOn": [
+        "[concat(resourceId('Microsoft.Compute/virtualMachines/extensions',  parameters('ServerNames')[copyIndex()], variables('extensionName')))]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "resources": [
+            {
+              "apiVersion": "2016-04-30-preview",
+              "type": "Microsoft.Compute/virtualMachines",
+              "name": "[parameters('ServerNames')[copyIndex()]]",
+              "location": "[resourceGroup().location]",
+              "properties": {
+                "storageProfile": {
+                  "osDisk": {
+                    "encryptionSettings": {
+                      "diskEncryptionKey": {
+                        "sourceVault": {
+                          "id": "[parameters('keyVaultResourceID')]"
+                        },
+                        "secretUrl": "[reference(concat(resourceId('Microsoft.Compute/virtualMachines/extensions',parameters('ServerNames')[copyIndex()],variables('extensionName')))).instanceView.statuses[0].message]"
+                      },
+                      "keyEncryptionKey": {
+                        "sourceVault": {
+                          "id": "[parameters('keyVaultResourceID')]"
+                        },
+                        "keyUrl": "[parameters('keyEncryptionKeyURL')]"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-BackupVM')]",
+      "type": "Microsoft.Resources/deployments",
+      "resourceGroup": "[parameters('existingRecoveryServicesVaultRG')]",
+      "apiVersion": "2017-05-10", 
+      "copy": {
+        "name": "BackupVMCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "dependsOn": [
+        "[concat(resourceId('Microsoft.Compute/virtualMachines/extensions',  parameters('ServerNames')[copyIndex()], variables('extensionName')))]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "resources": [
+            {
+              "name": "[concat(parameters('existingRecoveryServicesVault'), '/', variables('backupFabric'), '/', variables('v2VmContainer'), concat(parameters('existingVirtualMachinesResourceGroup'),';',parameters('ServerNames')[copyIndex()]), '/', variables('v2Vm'), concat(parameters('existingVirtualMachinesResourceGroup'),';',parameters('ServerNames')[copyIndex()]))]",
+              "apiVersion": "2016-06-01",
+              "location": "[parameters('Location')]",
+              "type": "Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems",
+              "properties": {
+                "protectedItemType": "[variables('v2VmType')]",
+                "policyId": "[resourceId('Microsoft.RecoveryServices/vaults/backupPolicies',parameters('existingRecoveryServicesVault'),parameters('existingBackupPolicy') )]",
+                "sourceResourceId": "[resourceId(subscription().subscriptionId,parameters('existingVirtualMachinesResourceGroup'),'Microsoft.Compute/virtualMachines',parameters('ServerNames')[copyIndex()])]"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Location": { "value": "East Us" },
+    "ApplicationSPN": { "value": "7b8184b9-6d9d-40e7-988b-da68fb139396" },
+    "KeyVaultName": { "value": "ArgusLegacyAMEProdKV" },
+    "TenantId": { "value": "36da45f1-dd2c-4d1f-af13-5abe46b99921" },
+    "VSTSSPN": { "value": "fec9ca4b-e6ce-4ecd-9648-b2f569f2bdf9" },
+    "TagsMemberFirm": { "value": "US" },
+    "TagsCountry": { "value": "US" },
+    "TagsContacts": { "value": "{\"Group\":\"usauditdevopsame@deloitte.com\",\"PrimaryContact\":\"mstrolle@deloitte.com;lalsworthelvey@deloitte.com\",\"SecondaryContact\":\"pbibireddy@deloitte.com\",\"BusinessOwneer\":\"jnaumann@deloitte.com;jhino@deloitte.com\"}" },
+    "TagsBillingCode": { "value": "FPX15805-RN-01-AZ-6629" },
+    "TagsCS": { "value": "{\"Classification\":\"HRC\",\"Type\":\"Both\",\"Qualifier\":\"High Risk Confidential\"}" },
+    "TagsAppID": { "value": "Argus" }
+  }
+}

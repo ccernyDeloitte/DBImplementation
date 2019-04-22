@@ -1,0 +1,347 @@
+﻿{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "Application": {
+      "type": "string",
+      "metadata": {
+        "description": "Description of what application this VM is used for.  The tag 'Application' will be set to this value."
+      }
+    },
+    "DevOpsStorageAccountAccessKey": {
+      "type": "securestring"
+    },
+    "DevOpsStorageAccountName": {
+      "type": "string"
+    },
+    "DiskSizeGB": {
+      "type": "int",
+      "defaultValue": 128
+    },
+    "Domain": {
+      "type": "string"
+    },
+    "EnvironmentId": {
+      "type": "string"
+    },
+    "Location": {
+      "type": "string"
+    },
+    "ManagedDiskAccountType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS"
+    },
+    "Offer": {
+      "type": "string"
+    },
+    "OMSResourceGroup": {
+      "type": "string"
+    },
+    "OMSSubscriptionID": {
+      "type": "string"
+    },
+    "OMSWorkspaceName": {
+      "type": "string"
+    },
+    "OrganizationalUnit": {
+      "type": "string"
+    },
+    "PlatformFaultDomainCount": {
+      "type": "int",
+      "defaultValue": 3
+    },
+    "PodDomainServicePassword": {
+      "type": "securestring"
+    },
+    "PodDomainServiceUser": {
+      "type": "string"
+    },
+    "Publisher": {
+      "type": "string"
+    },
+    "ServerCount": {
+      "type": "int"
+    },
+    "ServerNames": {
+      "type": "array"
+    },
+    "Sku": {
+      "type": "string"
+    },
+    "StarsLifeCycle": {
+      "type": "string"
+    },
+    "StarsPOD": {
+      "type": "string"
+    },
+    "SubnetRef": {
+      "type": "string"
+    },
+    "TimeZone": {
+      "type": "string"
+    },
+    "Version": {
+      "type": "string"
+    },
+    "VirtualMachineSize": {
+      "type": "string",
+      "defaultValue": "Standard_F4"
+    },
+    "VmAdminPassword": {
+      "type": "securestring"
+    },
+    "VmAdminUsername": {
+      "type": "string",
+      "defaultValue": "VmAdmin"
+    },
+    "TagBillingCode": { 
+      "type": "string"
+    }, 
+    "TagContactsBO": { 
+      "type": "string"
+    }, 
+    "TagContactsGroup": { 
+      "type": "string" 
+    }, 
+    "TagContactsPC": { 
+      "type": "string"
+    }, 
+    "TagContactsSC": { 
+      "type": "string"
+    }, 
+    "TagCountry": { 
+      "type": "string" 
+    }, 
+    "TagCsClassification": { 
+      "type": "string" 
+    }, 
+    "TagCsQualifier": { 
+      "type": "string"
+    }, 
+    "TagCsType": { 
+      "type": "string"
+    }, 
+    "TagFunction": {
+      "type": "string"
+    }, 
+    "TagMemberFirm": { 
+      "type": "string"
+    }
+  },
+  "variables": {
+    "Description": "[concat(parameters('EnvironmentId'),' App Server')]",
+    "availabilitySetName": "[concat(resourceGroup().name,'-APP')]",
+    "OMSResourceID": "[resourceId(parameters('OMSSubscriptionId'), parameters('OMSResourceGroup'), 'Microsoft.OperationalInsights/workspaces/', parameters('OMSWorkspaceName'))]"
+  },
+  "resources": [
+    {
+      "name": "[parameters('ServerNames')[copyIndex()]]",
+      "tags": {
+        "VmType": "app",
+        "Group": "US AUDIT",
+        "Application": "[parameters('Application')]",
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+	      "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+	      "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+	      "FUNCTION": "[parameters('TagFunction')]",	
+	      "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },
+      "copy": {
+        "name": "AppServerCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2016-04-30-preview",
+      "location": "[parameters('Location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkInterfaces/',concat(parameters('ServerNames')[copyIndex()],'-nic'))]",
+        "[concat('Microsoft.Compute/disks/',concat(parameters('ServerNames')[copyIndex()],'-datadisk1'))]",
+        "[variables('availabilitySetName')]"
+      ],
+      "properties": {
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySetName'))]"
+        },
+        "licenseType": "Windows_Server",
+        "osProfile": {
+          "computerName": "[parameters('ServerNames')[copyIndex()]]",
+          "adminUsername": "[parameters('VmAdminUsername')]",
+          "adminPassword": "[parameters('VmAdminPassword')]",
+          "windowsConfiguration": {
+            "provisionVmAgent": "true"
+          }
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('VirtualMachineSize')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[parameters('Publisher')]",
+            "offer": "[parameters('Offer')]",
+            "sku": "[parameters('Sku')]",
+            "version": "[parameters('Version')]"
+          },
+          "osDisk": {
+            "name": "[concat(parameters('ServerNames')[copyIndex()],'-osdisk')]",
+            "createOption": "fromImage",
+            "caching": "ReadWrite"
+          },
+          "dataDisks": [
+            {
+              "name": "[concat(parameters('ServerNames')[copyIndex()],'-datadisk1')]",
+              "lun": 0,
+              "managedDisk": {
+                "id": "[resourceId('Microsoft.Compute/disks', concat(parameters('ServerNames')[copyIndex()],'-datadisk1'))]"
+              },
+              "createOption": "Attach"
+            }
+          ]
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('ServerNames')[copyIndex()],'-nic'))]"
+            }
+          ]
+        }
+      },      
+      "resources": [
+        {
+          "name": "CustomScript",
+          "type": "extensions",
+          "location": "[parameters('Location')]",
+          "apiVersion": "2016-03-30",
+          "dependsOn": [
+            "[resourceId('Microsoft.Compute/virtualMachines', parameters('ServerNames')[copyIndex()])]"
+          ],
+          "tags": {
+            "displayName": "CustomScript"
+          },
+          "properties": {
+            "publisher": "Microsoft.Compute",
+            "type": "CustomScriptExtension",
+            "typeHandlerVersion": "1.8",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "fileUris": [
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/CloudScript.exe')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/firstboot.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/secondboot.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Set-GroupAccess.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Setup-BaseServer.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Configure-WinRM.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/winrmconf.cmd')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Disable-IaaSIESESC.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Setup-HardDrives.ps1')]",
+                "[concat('https://',parameters('DevOpsStorageAccountName'),'.blob.core.windows.net/vm-provisioning-v2/Setup-WebServer.ps1')]"
+              ]
+            },
+            "protectedSettings": {
+              "commandToExecute": "[concat('powershell -ExecutionPolicy Unrestricted -file firstboot.ps1 -Domain ', parameters('Domain'),' -OrganizationalUnit ',parameters('OrganizationalUnit'),' -PodDomainServiceUser ',parameters('PodDomainServiceUser'),' -PodDomainServicePassword ',parameters('PodDomainServicePassword'),' -Environment ',parameters('EnvironmentId'),' -Description ',variables('Description'),' -ServerType APP', ' -StarsPod ',parameters('StarsPOD'), add(mod(copyIndex(),3),1), ' -TimeZone \"', parameters('TimeZone'), '\" -starsLifeCycle \"', parameters('StarsLifeCycle'),'\"')]",
+              "storageAccountName": "[parameters('DevOpsStorageAccountName')]",
+              "storageAccountKey": "[parameters('DevOpsStorageAccountAccessKey')]"
+            }
+          }
+        },
+        {
+          "type": "extensions",
+          "name": "Microsoft.EnterpriseCloud.Monitoring",
+          "apiVersion": "2015-06-15",
+          "location": "[parameters('Location')]",
+          "tags": {
+            "displayName": "Monitoring-OMS"
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Compute/virtualMachines', parameters('ServerNames')[copyIndex()])]"
+          ],
+          "properties": {
+            "publisher": "Microsoft.EnterpriseCloud.Monitoring",
+            "type": "MicrosoftMonitoringAgent",
+            "typeHandlerVersion": "1.0",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "workspaceId": "[reference(variables('OMSResourceID'), '2015-03-20').customerId]"
+            },
+            "protectedSettings": {
+              "workspaceKey": "[listKeys(variables('OMSResourceID'), '2015-03-20').primarySharedKey]"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-datadisk1')]",
+      "copy": {
+        "name": "DiskCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Compute/disks",
+      "apiVersion": "2016-04-30-preview",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+        "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+        "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+        "FUNCTION": "[parameters('TagFunction')]",	
+        "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },
+      "properties": {
+        "creationData": {
+          "createOption": "Empty"
+        },
+        "accountType": "[parameters('ManagedDiskAccountType')]",
+        "diskSizeGB": "[parameters('DiskSizeGB')]"
+      }      
+    },
+    {
+      "name": "[concat(parameters('ServerNames')[copyIndex()],'-nic')]",
+      "copy": {
+        "name": "NicCopy",
+        "count": "[parameters('ServerCount')]"
+      },
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2016-09-01",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+        "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+        "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+        "FUNCTION": "[parameters('TagFunction')]",	
+        "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },      
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[parameters('SubnetRef')]"
+              },
+              "privateIPAllocationMethod": "Dynamic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2016-04-30-preview",
+      "type": "Microsoft.Compute/availabilitySets",
+      "name": "[variables('availabilitySetName')]",
+      "location": "[parameters('Location')]",
+      "tags": {
+        "displayName": "availability-set",
+        "BILLINGCODE": "[parameters('TagBillingCode')]",
+        "CONTACTS": "[concat('{ \"BusinesOwner\": \"', parameters('TagContactsBO'), '\", \"Group\": \"', parameters('TagContactsGroup'), '\", \"PrimaryContact\": \"', parameters('TagContactsPC'), '\", \"SecondaryContact\": \"', parameters('TagContactsSC'), '\" }')]",
+        "CS": "[concat('{ \"Classification\": \"', parameters('TagCsClassification'), '\", \"Qualifier\": \"', parameters('TagCsQualifier'), '\", \"Type\": \"', parameters('TagCsType') , '\" }')]",
+        "FUNCTION": "[parameters('TagFunction')]",	
+        "MEMBERFIRM": "[parameters('TagMemberFirm')]"
+      },      
+      "properties": {
+        "platformFaultDomainCount": "[parameters('PlatformFaultDomainCount')]",
+        "platformUpdateDomainCount": "5",
+        "managed": true
+      }
+    }
+
+  ]
+}

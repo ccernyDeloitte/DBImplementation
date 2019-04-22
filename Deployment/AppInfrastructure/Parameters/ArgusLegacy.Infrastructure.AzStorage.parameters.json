@@ -1,0 +1,52 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "AppName": {
+            "value": "$(App-Name)"
+        },
+        "Geo": {
+            "value": "$(GEO)"
+        },
+        "Environment": {
+            "value": "$(Environment)"
+        },
+        "Location": {
+            "value": "$(App-Location)"
+        },
+        "TAGSADDENDUM": {
+            "value": "Infrastructure for $(App-Name) on $(GEO) region"
+        },
+        "TAGSAPPID": {
+            "value": "$(CMDBID)"
+        },
+        "TAGSBILLINGCODE": {
+            "value": "$(BillingCode)"
+        },
+        "TAGSCONTACTS": {
+            "value": "{\"Group\":\"usauditdevopsame@deloitte.com\",\"PrimaryContact\":\"supasupuleti@deloitte.com\",\"SecondaryContact\":\"lalsworthelvey@deloitte.com\"}"
+        },
+        "TAGSCS": {
+            "value": "{\"Classification\":\"CON\",\"Type\":\"Deloitte\",\"Qualifier\":\"Intellectual Property\"}"
+        },
+        "TAGSFUNCTION": {
+            "value": "{\"Function\":\"AUD\",\"Geo\":\"$(GEO)\"}"
+        },
+        "TAGSMEMBERFIRM": {
+            "value": "{\"MemberFirm\":\"US\",\"Country\":\"US\"}"
+        },
+        "TAGSREQUESTID": {
+            "value": "Automatically generated from provisioning system."
+        },
+        "TAGSENVIRONMENT": {
+            "value": "$(Environment)"
+        },
+       
+        "StorageAccountSKU": {
+            "value": "$(StorageAccountSku)"
+        },
+        "StorageAccountAccessTier": {
+            "value": "$(StorageAccountAccessTier)"
+        }
+    }
+}
